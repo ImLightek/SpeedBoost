@@ -1,242 +1,138 @@
-local Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/xHeptc/Kavo-UI-Library/main/source.lua"))()
-local Window = Library.CreateLib("Notoriety Suite | Written by Light", "DarkTheme")
-
-local MainTab = Window:NewTab("Movement")
-local Section = MainTab:NewSection("Bypass Modules")
-
-local VisualsTab = Window:NewTab("Visuals")
-local VisualsSection = VisualsTab:NewSection("ESP")
-
 local Players = game:GetService("Players")
-local LocalPlayer = Players.LocalPlayer
 local RunService = game:GetService("RunService")
-local UIS = game:GetService("UserInputService")
+local UserInputService = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
 
-local flyEnabled = false
-local noclipEnabled = false
-local speedEnabled = false
-local guardEspEnabled = false
-local civilianEspEnabled = false
-local itemEspEnabled = false
+local player = Players.LocalPlayer
+local pgui = player:WaitForChild("PlayerGui")
 
-local flySpeed = 25 
-local walkSpeedValue = 25 
-
-local GuardCache = {}
-local CivilianCache = {}
-local CardCache = {}
-
-local function createEsp(model, color, labelText, cacheTable)
-    if not model or not model.Parent then return end
-    local hrp = model:FindFirstChild("HumanoidRootPart") or model:FindFirstChildOfClass("MeshPart") or model:FindFirstChildOfClass("Part")
-    if not hrp or hrp:FindFirstChild("LightESP") then return end
-
-    local bgui = Instance.new("BillboardGui")
-    bgui.Name = "LightESP"
-    bgui.AlwaysOnTop = true
-    bgui.Size = UDim2.new(0, 120, 0, 30)
-    bgui.Adornee = hrp
-    bgui.Parent = hrp
-
-    local textLabel = Instance.new("TextLabel")
-    textLabel.Size = UDim2.new(1, 0, 1, 0)
-    textLabel.BackgroundTransparency = 1
-    textLabel.Text = labelText
-    textLabel.TextColor3 = color
-    textLabel.TextSize = 13
-    textLabel.Font = Enum.Font.SourceSansBold
-    textLabel.TextStrokeTransparency = 0
-    textLabel.Parent = bgui
-
-    local highlight = Instance.new("Highlight")
-    highlight.Name = "LightHighlight"
-    highlight.FillColor = color
-    highlight.FillTransparency = 0.5
-    highlight.OutlineColor = Color3.fromRGB(255, 255, 255)
-    highlight.OutlineTransparency = 0.2
-    highlight.Adornee = model
-    highlight.Parent = (model:IsA("Model") and model or hrp)
-
-    cacheTable[model] = {Gui = bgui, High = highlight}
+-- Если старый скрипт уже запущен — сносим его
+if pgui:FindFirstChild("SpeedBoostGui") then
+    pgui.SpeedBoostGui:Destroy()
 end
 
-local function clearCacheTable(cacheTable)
-    for model, elements in pairs(cacheTable) do
-        pcall(function()
-            if elements.Gui then elements.Gui:Destroy() end
-            if elements.High then elements.High:Destroy() end
-        end)
-        cacheTable[model] = nil
-    end
-end
+local targetSpeed = 16 -- Дефолтная скорость
+local boostEnabled = false
 
-local function checkNPC(model)
-    if not model:IsA("Model") or not model:FindFirstChild("Humanoid") or not model:FindFirstChild("HumanoidRootPart") then return nil, false end
-    if Players:GetPlayerFromCharacter(model) then return nil, false end
-    
-    local name = model.Name:lower()
-    local hasKeycard = false
-    
-    if model:FindFirstChild("Keycard") or model:FindFirstChild("Key Card") or model:FindFirstChild("MagneticCard") or model:FindFirstChild("AccessCard") then
-        hasKeycard = true
-    end
-    
-    for _, item in ipairs(model:GetChildren()) do
-        if item:IsA("StringValue") and (item.Name:lower():find("card") or item.Value:lower():find("card")) then
-            hasKeycard = true
-            break
-        end
-    end
-    
-    if name:find("guard") or name:find("police") or name:find("swat") or name:find("agent") or model:FindFirstChild("Radio") or model:FindFirstChild("Pager") then
-        return "guard", hasKeycard
-    end
-    
-    if name:find("civilian") or name:find("manager") or name:find("witness") or name:find("hostage") or model:FindFirstChild("Panic") or (model.Humanoid.MaxHealth == 100 and not name:find("dummy")) then
-        return "civilian", hasKeycard
-    end
-    
-    return nil, false
-end
+-- СОЗДАНИЕ ИНТЕРФЕЙСА
+local screenGui = Instance.new("ScreenGui", pgui)
+screenGui.Name = "SpeedBoostGui"
+screenGui.ResetOnSpawn = false
 
-local function isWorldKeycard(obj)
-    if obj:IsA("Part") or obj:IsA("MeshPart") or obj:IsA("Model") then
-        local name = obj.Name:lower()
-        if name:find("keycard") or name:find("key_card") or name:find("magneticcard") or name:find("access_card") then
-            return true
-        end
-        if obj.Parent and obj.Parent.Name:lower():find("keycard") then
-            return true
-        end
-    end
-    return false
-end
+local mainFrame = Instance.new("Frame", screenGui)
+mainFrame.Size = UDim2.new(0, 240, 0, 160)
+mainFrame.Position = UDim2.new(0.5, -120, 0.4, 0)
+mainFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
+mainFrame.BorderSizePixel = 0
+mainFrame.Active = true
+Instance.new("UICorner", mainFrame).CornerRadius = UDim.new(0, 8)
 
-local function processObject(obj)
-    if not obj or not obj.Parent then return end
-    
-    local npcType, hasKeycard = checkNPC(obj)
-    if npcType == "guard" and guardEspEnabled then
-        if hasKeycard then
-            createEsp(obj, Color3.fromRGB(255, 165, 0), "Guard [KEYCARD]", GuardCache)
-        else
-            createEsp(obj, Color3.fromRGB(255, 50, 50), "Guard", GuardCache)
-        end
-    elseif npcType == "civilian" and civilianEspEnabled then
-        if hasKeycard then
-            createEsp(obj, Color3.fromRGB(255, 215, 0), "Civilian [KEYCARD]", CivilianCache)
-        else
-            createEsp(obj, Color3.fromRGB(50, 255, 50), "Civilian", CivilianCache)
-        end
-    elseif isWorldKeycard(obj) and itemEspEnabled then
-        createEsp(obj, Color3.fromRGB(160, 32, 240), "[KEYCARD]", CardCache)
-    end
-end
+-- КРЕСТИК ЗА КРЫТИЯ (В углу панели)
+local closeBtn = Instance.new("TextButton", mainFrame)
+closeBtn.Size = UDim2.new(0, 25, 0, 25)
+closeBtn.Position = UDim2.new(1, -30, 0, 5)
+closeBtn.BackgroundTransparency = 1
+closeBtn.Text = "✕"
+closeBtn.TextColor3 = Color3.fromRGB(150, 150, 160)
+closeBtn.TextSize = 16
+closeBtn.Font = Enum.Font.SourceSansBold
 
-RunService.Stepped:Connect(function()
-    if noclipEnabled and LocalPlayer.Character then
-        for _, part in ipairs(LocalPlayer.Character:GetDescendants()) do
-            if part:IsA("BasePart") then
-                part.CanCollide = false
-            end
-        end
+closeBtn.MouseEnter:Connect(function() closeBtn.TextColor3 = Color3.fromRGB(240, 60, 60) end)
+closeBtn.MouseLeave:Connect(function() closeBtn.TextColor3 = Color3.fromRGB(150, 150, 160) end)
+
+closeBtn.Activated:Connect(function()
+    boostEnabled = false
+    -- Возвращаем стандартную скорость перед выходом
+    local char = player.Character
+    local hum = char and char:FindFirstChildOfClass("Humanoid")
+    if hum then hum.WalkSpeed = 16 end
+    screenGui:Destroy()
+end)
+
+-- ЗАГОЛОВОК
+local title = Instance.new("TextLabel", mainFrame)
+title.Size = UDim2.new(1, -40, 0, 35)
+title.Position = UDim2.new(0, 10, 0, 0)
+title.BackgroundTransparency = 1
+title.Text = "⚡ SPEED BOOST"
+title.TextColor3 = Color3.fromRGB(255, 255, 255)
+title.TextSize = 14
+title.Font = Enum.Font.SourceSansBold
+title.TextXAlignment = Enum.TextXAlignment.Left
+
+-- ТЕКСТОВОЕ ПОЛЕ ДЛЯ ВВОДА СКОРОСТИ
+local speedInput = Instance.new("TextBox", mainFrame)
+speedInput.Size = UDim2.new(1, -20, 0, 35)
+speedInput.Position = UDim2.new(0, 10, 0, 45)
+speedInput.BackgroundColor3 = Color3.fromRGB(40, 40, 45)
+speedInput.Text = "50" -- Стартовое значение в поле
+speedInput.TextColor3 = Color3.fromRGB(255, 255, 255)
+speedInput.Font = Enum.Font.SourceSansBold
+speedInput.TextSize = 16
+Instance.new("UICorner", speedInput).CornerRadius = UDim.new(0, 5)
+
+-- КНОПКА ВКЛЮЧЕНИЯ / ВЫКЛЮЧЕНИЯ
+local toggleBtn = Instance.new("TextButton", mainFrame)
+toggleBtn.Size = UDim2.new(1, -20, 0, 40)
+toggleBtn.Position = UDim2.new(0, 10, 0, 95)
+toggleBtn.BackgroundColor3 = Color3.fromRGB(180, 50, 50)
+toggleBtn.Text = "ВКЛЮЧИТЬ БУСТ"
+toggleBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+toggleBtn.Font = Enum.Font.SourceSansBold
+toggleBtn.TextSize = 14
+Instance.new("UICorner", toggleBtn).CornerRadius = UDim.new(0, 5)
+
+-- ОБРАБОТКА ДРАГА ПАНЕЛИ (Перетаскивание мышкой)
+local dragging, dragStart, startPos
+mainFrame.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        dragging = true; dragStart = input.Position; startPos = mainFrame.Position
+        input.Changed:Connect(function() if input.UserInputState == Enum.UserInputState.End then dragging = false end end)
+    end
+end)
+UserInputService.InputChanged:Connect(function(input)
+    if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
+        local delta = input.Position - dragStart
+        mainFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
     end
 end)
 
+-- ЛОГИКА РАБОТЫ КНОПКИ
+toggleBtn.Activated:Connect(function()
+    boostEnabled = not boostEnabled
+    
+    if boostEnabled then
+        -- Считываем число из инпута, если там бред — ставим 50
+        local num = tonumber(speedInput.Text)
+        targetSpeed = num or 50
+        speedInput.Text = tostring(targetSpeed)
+        
+        toggleBtn.Text = "ВЫКЛЮЧИТЬ БУСТ"
+        toggleBtn.BackgroundColor3 = Color3.fromRGB(50, 150, 50)
+    else
+        toggleBtn.Text = "ВКЛЮЧИТЬ БУСТ"
+        toggleBtn.BackgroundColor3 = Color3.fromRGB(180, 50, 50)
+        
+        -- Сбрасываем на стандартную скорость ногами
+        local char = player.Character
+        local hum = char and char:FindFirstChildOfClass("Humanoid")
+        if hum then hum.WalkSpeed = 16 end
+    end
+end)
+
+-- БЕЗОПАСНЫЙ ПОКАДРОВЫЙ ЦИКЛ ОБНОВЛЕНИЯ СКОРОСТИ
 RunService.Heartbeat:Connect(function()
-    if flyEnabled and LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
-        local hrp = LocalPlayer.Character.HumanoidRootPart
-        local camera = workspace.CurrentCamera
-        local moveDirection = Vector3.new(0, 0, 0)
-        
-        if UIS:IsKeyDown(Enum.KeyCode.W) then moveDirection = moveDirection + camera.CFrame.LookVector end
-        if UIS:IsKeyDown(Enum.KeyCode.S) then moveDirection = moveDirection - camera.CFrame.LookVector end
-        if UIS:IsKeyDown(Enum.KeyCode.D) then moveDirection = moveDirection + camera.CFrame.RightVector end
-        if UIS:IsKeyDown(Enum.KeyCode.A) then moveDirection = moveDirection - camera.CFrame.RightVector end
-        if UIS:IsKeyDown(Enum.KeyCode.Space) then moveDirection = moveDirection + Vector3.new(0, 1, 0) end
-        if UIS:IsKeyDown(Enum.KeyCode.LeftShift) then moveDirection = moveDirection - Vector3.new(0, 1, 0) end
-        
-        if moveDirection.Magnitude > 0 then
-            hrp.Velocity = moveDirection.Unit * flySpeed
+    local char = player.Character
+    local hum = char and char:FindFirstChildOfClass("Humanoid")
+    
+    if hum then
+        if boostEnabled then
+            -- Жестко держим скорость, блокируя попытки игры вернуть 16
+            if hum.WalkSpeed ~= targetSpeed then
+                hum.WalkSpeed = targetSpeed
+            end
         else
-            hrp.Velocity = Vector3.new(0, math.sin(tick() * 10) * 0.2, 0)
+            -- Если буст выключен, скрипт не лезет в физику
         end
-    end
-end)
-
-RunService.Heartbeat:Connect(function()
-    if speedEnabled and LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
-        local hum = LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
-        local hrp = LocalPlayer.Character.HumanoidRootPart
-        
-        if hum and hum.MoveDirection.Magnitude > 0 then
-            local targetVelocity = hum.MoveDirection * walkSpeedValue
-            hrp.Velocity = Vector3.new(targetVelocity.X, hrp.Velocity.Y, targetVelocity.Z)
-        end
-    end
-end)
-
-task.spawn(function()
-    while task.wait(2) do 
-        if guardEspEnabled or civilianEspEnabled or itemEspEnabled then
-            for _, obj in ipairs(workspace:GetChildren()) do
-                processObject(obj)
-            end
-            if workspace:FindFirstChild("Entities") then
-                for _, obj in ipairs(workspace.Entities:GetChildren()) do
-                    processObject(obj)
-                end
-            end
-        end
-    end
-end)
-
-UIS.InputBegan:Connect(function(input, gameProcessed)
-    if not gameProcessed and input.KeyCode == Enum.KeyCode.RightControl then
-        local gui = game:GetService("CoreGui"):FindFirstChild("Notoriety Suite | Written by Light") or game:GetService("Players").LocalPlayer:WaitForChild("PlayerGui"):FindFirstChild("Notoriety Suite | Written by Light")
-        if gui then
-            gui.Enabled = not gui.Enabled
-        end
-    end
-end)
-
-Section:NewToggle("Legit Fly", "Fly (W,A,S,D + Space/Shift)", function(state)
-    flyEnabled = state
-end)
-
-Section:NewSlider("Fly Speed", "Max 60 recommended", 80, 15, function(s)
-    flySpeed = s
-end)
-
-Section:NewToggle("Legit Speed", "Speedhack", function(state)
-    speedEnabled = state
-end)
-
-Section:NewSlider("Speed Value", "Recommended: 25-45", 60, 16, function(s)
-    walkSpeedValue = s
-end)
-
-Section:NewToggle("NoClip", "Wallpass", function(state)
-    noclipEnabled = state
-end)
-
-VisualsSection:NewToggle("Guard ESP", "Show Guards", function(state)
-    guardEspEnabled = state
-    if not state then
-        clearCacheTable(GuardCache)
-    end
-end)
-
-VisualsSection:NewToggle("Civilian ESP", "Show Civilians", function(state)
-    civilianEspEnabled = state
-    if not state then
-        clearCacheTable(CivilianCache)
-    end
-end)
-
-VisualsSection:NewToggle("Keycards on Map", "Show World Keycards", function(state)
-    itemEspEnabled = state
-    if not state then
-        clearCacheTable(CardCache)
     end
 end)
